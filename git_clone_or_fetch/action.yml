@@ -1,0 +1,73 @@
+name: git_clone_or_fetch
+inputs:
+  gh_token:
+    required: true
+  work_dir:
+    required: true
+    description: The directory where code is checked out
+    default: /opt/shared-workspace/repos     
+runs:
+  using: "composite"
+  steps:
+  - name: Update repository
+    shell: bash
+    run: |
+      LOCKFILE="${{ inputs.work_dir }}/${{ github.event.repository.name }}/.git.lock"
+      
+      # Ensure work directory exists
+      mkdir -p "${{ inputs.work_dir }}/${{ github.event.repository.name }}"
+      
+      # Open file descriptor for lock
+      exec 200>"$LOCKFILE"
+      
+      # Progressive lock attempts: 30s, 60s, 120s, 240s, 300s
+      TIMEOUTS=(30 60 120 240 300)
+      LOCK_ACQUIRED=false
+      
+      for i in "${!TIMEOUTS[@]}"; do
+        TIMEOUT="${TIMEOUTS[$i]}"
+        ATTEMPT=$((i + 1))
+        
+        echo "Attempt $ATTEMPT/${#TIMEOUTS[@]}: Trying to acquire lock (timeout: ${TIMEOUT}s)..."
+        
+        if flock -w "$TIMEOUT" 200; then
+          echo "Lock acquired on attempt $ATTEMPT"
+          LOCK_ACQUIRED=true
+          break
+        else
+          echo "Failed to acquire lock within ${TIMEOUT}s"
+          if [ $ATTEMPT -lt ${#TIMEOUTS[@]} ]; then
+            echo "Retrying with longer timeout..."
+          fi
+        fi
+      done
+      
+      if [ "$LOCK_ACQUIRED" = false ]; then
+        echo "ERROR: Failed to acquire lock after ${#TIMEOUTS[@]} attempts"
+        exit 1
+      fi
+      
+      # Git operations
+      cd "${{ inputs.work_dir }}/${{ github.event.repository.name }}"
+      
+      if [ -d "${{ github.event.repository.name }}/.git" ]; then
+        echo "GIT FETCH"
+        cd "${{ github.event.repository.name }}"
+        git reset --hard HEAD
+        git clean -fd
+        git remote set-url origin https://x-access-token:${{ inputs.gh_token }}@github.com/${{ github.repository }}
+        git fetch origin --prune
+        git checkout ${{ github.sha }}
+      else
+        echo "GIT CLONE"
+        git clone https://x-access-token:${{ inputs.gh_token }}@github.com/${{ github.repository }} "${{ github.event.repository.name }}"
+        cd "${{ github.event.repository.name }}"
+        git checkout ${{ github.sha }}
+      fi
+      
+      # Release lock
+      flock -u 200
+      
+      echo "Repository ready at: ${{ inputs.work_dir }}/${{ github.event.repository.name }}/${{ github.event.repository.name }}"
+    env:
+      GITHUB_TOKEN: ${{ inputs.gh_token }}
