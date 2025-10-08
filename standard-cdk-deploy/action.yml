@@ -66,7 +66,7 @@ runs:
     - name: Retrieve
       uses: energidata/gh_actions/s3retrieve@main
       with:
-        destination: publish/${{ inputs.path }}/${{ inputs.name }}.zip
+        destination: ${{ env.WORKING_DIRECTORY }}/publish/${{ inputs.path }}/${{ inputs.name }}.zip
         source: s3://ed-build-artifacts/${{ inputs.name }}/${{ inputs.name }}.zip
         gh_repo: enity
         run_nr: ${{ env.RUN_NR }} # Use the env var set above
@@ -75,8 +75,8 @@ runs:
     - name: Unpack
       shell: bash
       run: |
-        mkdir -p publish/${{ inputs.path }}
-        cd publish/${{ inputs.path }}
+        mkdir -p ${{ env.WORKING_DIRECTORY }}/publish/${{ inputs.path }}
+        cd ${{ env.WORKING_DIRECTORY }}/publish/${{ inputs.path }}
         unzip -o ${{ inputs.name }}.zip
         if [ -f .github_sha ]; then
           STORED_SHA=$(cat .github_sha)
