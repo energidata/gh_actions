@@ -1,0 +1,29 @@
+name: s3retrieve
+
+inputs:
+  source: 
+    required: true
+    description: 'S3 source path'
+  destination:
+    required: true
+    description: 'Local destination path'
+  run_nr:
+    required: false
+    description: 'Run number to append to the source file name'
+  default_run_nr:
+    required: false
+    default: 'latest'
+    description: 'Default run number to use if run_nr is not provided'
+
+runs:
+  using: "composite"
+  steps:
+  - name: s3 retrieve
+    shell: bash
+    run: |
+      mkdir -p $(dirname "${{ inputs.destination }}")
+      RUN_NR="${{ inputs.run_nr }}"
+      if [ -z "$RUN_NR" ]; then
+        RUN_NR="${{ inputs.default_run_nr }}"
+      fi
+      aws s3 cp "${{ inputs.source }}.$RUN_NR" "${{ inputs.destination }}" || echo "Failed to retrieve artifact"
