@@ -1,0 +1,101 @@
+name: 'standard-cdk-deploy-setup'
+description: 'Setup everything to deploy CDK stack(s)'
+inputs:
+  env:
+    type: string
+  env_run_nr: 
+    type: string
+  path:
+    type: string
+    description: path to code f.i. cdk/glue_transforms or scripts/glue
+  artifact_aws_region:
+    type: string
+  artifact_aws_role:
+    type: string
+  aws_region:
+    type: string
+  aws_account_id:
+    type: string
+  name:
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Run number and proxy account
+      shell: bash
+      run: |
+        if [ "${{ inputs.env || env.ENVIRONMENT }}" != "${{ env.ENVIRONMENT }}" ];then
+          echo "RUN_NR=${{ inputs.env_run_nr }}" >> $GITHUB_ENV
+        else
+          echo "RUN_NR=${{ github.run_number }}" >> $GITHUB_ENV
+        fi
+
+    - name: Configure DEV AWS Credentials
+      shell: bash
+      run: |
+        CREDS=$(aws sts assume-role \
+          --role-arn ${{ inputs.artifact_aws_role }} \
+          --role-session-name artifactSession \
+          --duration-seconds 1200 \
+          --region ${{ inputs.artifact_aws_region }})
+
+        echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)" >> $GITHUB_ENV
+        echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
+        echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)" >> $GITHUB_ENV
+        echo "AWS_DEFAULT_REGION=${{ inputs.artifact_aws_region }}" >> $GITHUB_ENV
+
+    
+    - name: Package Stack
+      if: ${{ (inputs.env || env.ENVIRONMENT ) == env.ENVIRONMENT }}
+      shell: bash
+      run: |
+        cd ${{ env.WORKING_DIRECTORY }}/${{ inputs.path }}
+        echo "${{ github.sha }}" > .github_sha
+        zip -r stack.zip . -x 'node_modules/*' 'cdk/node_modules/*'
+
+    - name: Store
+      if: ${{ (inputs.env || env.ENVIRONMENT ) == env.ENVIRONMENT }}
+      uses: ./ga_actions/s3store
+      with:
+        source: ${{ env.WORKING_DIRECTORY }}/${{ inputs.path }}/stack.zip
+        destination: s3://ed-build-artifacts/${{ inputs.name }}/${{ inputs.name }}.zip
+        gh_repo: enity
+        repo_dir: $(dirname "$GITHUB_WORKSPACE")
+
+    - name: Retrieve
+      uses: ./ga_actions/s3retrieve
+      with:
+        destination: publish/${{ inputs.path }}/${{ inputs.name }}.zip
+        source: s3://ed-build-artifacts/${{ inputs.name }}/${{ inputs.name }}.zip
+        gh_repo: enity
+        run_nr: ${{ env.RUN_NR }} # Use the env var set above
+        repo_dir: $(dirname "$GITHUB_WORKSPACE")
+
+    - name: Unpack
+      shell: bash
+      run: |
+        mkdir -p publish/${{ inputs.path }}
+        cd publish/${{ inputs.path }}
+        unzip -o ${{ inputs.name }}.zip
+        if [ -f .github_sha ]; then
+          STORED_SHA=$(cat .github_sha)
+          echo "SHA=$STORED_SHA" >> $GITHUB_ENV
+          echo "Retrieved SHA from package: $STORED_SHA"
+        fi
+
+    - name: Assume role in deployment account
+      shell: bash
+      run: |
+        CREDS=$(aws sts assume-role \
+          --role-arn 'arn:aws:iam::${{ inputs.aws_account_id }}:role/cdk-hnb659fds-cfn-exec-role-${{ inputs.aws_account_id }}-${{ inputs.aws_region }}' \
+          --role-session-name deploySession \
+          --duration-seconds 1200 \
+          --region ${{ inputs.aws_region }})
+
+        echo "AWS_ACCESS_KEY_ID=$(echo $CREDS | jq -r .Credentials.AccessKeyId)" >> $GITHUB_ENV
+        echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDS | jq -r .Credentials.SecretAccessKey)" >> $GITHUB_ENV
+        echo "AWS_SESSION_TOKEN=$(echo $CREDS | jq -r .Credentials.SessionToken)" >> $GITHUB_ENV
+        echo "AWS_DEFAULT_REGION=${{ inputs.artifact_aws_region }}" >> $GITHUB_ENV
+
+        

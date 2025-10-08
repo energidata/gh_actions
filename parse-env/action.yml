@@ -1,0 +1,50 @@
+name: parse_env
+
+inputs:
+  env_file: 
+    required: true
+
+outputs:
+  env_vars:
+    description: 'JSON string of parsed environment variables'
+    value: ${{ steps.process-env.outputs.env_vars }}
+
+runs:
+  using: "composite"
+  steps:
+  - name: Process ENV file
+    id: process-env
+    shell: bash
+    run: |
+      process_env_file() {
+        local file="$1"
+        local json_output="{"
+        local first=true
+        while IFS= read -r line || [[ -n "$line" ]]; do
+          [[ "$line" =~ ^[[:space:]]*#.*$ || -z "$line" ]] && continue
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
+          if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            # Remove both leading and trailing quotes (single or double)
+            value=$(echo "$value" | sed -E "s/^['\"]?//; s/['\"]?$//")
+            # Escape the value for JSON
+            value=$(jq -n --arg v "$value" '$v')
+            # Remove the leading and trailing quotes added by jq
+            value="${value#\"}"
+            value="${value%\"}"
+            if [ "$first" = true ]; then
+              first=false
+            else
+              json_output+=","
+            fi
+            json_output+="\"$key\":\"$value\""
+          fi
+        done < "$file"
+        json_output+="}"
+        echo "env_vars=$json_output" >> $GITHUB_OUTPUT
+      }
+
+      process_env_file "${{ inputs.env_file }}"
+

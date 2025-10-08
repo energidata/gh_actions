@@ -1,0 +1,76 @@
+name: 'container-build-push'
+description: 'Build and push Docker image'
+inputs:
+  # dockerfile:
+  #   required: false
+  #   default: ./Dockerfile
+  npm-auth-token:
+    required: true
+  artifact_aws_region:
+    required: true
+  artifact_aws_role: 
+    required: true
+  path: 
+    required: true
+  working_dir:
+    required: true
+    default: ${{ github.workspace }}
+  # service:
+  #   required: true
+outputs:
+  image-name:
+    description: "Container image name"
+    value: ${{ steps.image-name.outputs.image-name }}
+runs:
+  using: "composite"
+  steps:
+    - id: package
+      uses: codex-team/action-nodejs-package-info@v1.1
+      with:
+        path: "${{ inputs.working_dir }}/${{ inputs.path }}" 
+        
+    - uses: rlespinasse/github-slug-action@v4
+    
+    - id: image-name
+      shell: bash
+      run: |
+        RANDOM_NUMBER=$(shuf -i 1000-9999 -n 1)
+        # with regex remove @ and / from package name
+        PACKAGE_NAME_CLEAN=`sed -E 's/@//g; s/\//-/g' <<< "${{ steps.package.outputs.name }}"`
+        echo "image-name=${PACKAGE_NAME_CLEAN}-${{ env.GITHUB_REF_SLUG }}-${{ steps.package.outputs.version }}.${{ github.run_number }}.${RANDOM_NUMBER}" >> $GITHUB_OUTPUT
+
+    - name: Configure DEV AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.artifact_aws_region }}
+        role-session-name: artifactSession
+        role-to-assume: ${{ inputs.artifact_aws_role }} 
+        role-duration-seconds: 1200
+
+    - name: ECR Login
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Pull base image
+      shell: bash
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        docker pull ${{ env.REGISTRY }}/ed_services:build-image-7
+
+    - name: Build and push Docker image
+      shell: bash
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        REPOSITORY: ed_services
+        IMAGE_TAG: ${{ steps.image-name.outputs.image-name }} 
+      run: |
+        if [ -f ${{ inputs.path}}/Dockerfile ]; then
+          DOCKERFILE=${{ inputs.path}}/Dockerfile
+        else
+          DOCKERFILE=./Dockerfile
+        fi
+        docker build -t ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }} --build-arg NPM_AUTH_TOKEN=${{ inputs.npm-auth-token }} --build-arg SERVICE_PATH=${{ inputs.path }} -f "$DOCKERFILE" .
+        docker push ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
+      working-directory: ${{ inputs.working_dir }}
+        
