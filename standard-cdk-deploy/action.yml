@@ -56,7 +56,7 @@ runs:
 
     - name: Store
       if: ${{ (inputs.env || env.ENVIRONMENT ) == env.ENVIRONMENT }}
-      uses: ./ga_actions/s3store
+      uses: energidata/gh_actions/s3store@main
       with:
         source: ${{ env.WORKING_DIRECTORY }}/${{ inputs.path }}/stack.zip
         destination: s3://ed-build-artifacts/${{ inputs.name }}/${{ inputs.name }}.zip
@@ -64,7 +64,7 @@ runs:
         repo_dir: $(dirname "$GITHUB_WORKSPACE")
 
     - name: Retrieve
-      uses: ./ga_actions/s3retrieve
+      uses: energidata/gh_actions/s3retrieve@main
       with:
         destination: publish/${{ inputs.path }}/${{ inputs.name }}.zip
         source: s3://ed-build-artifacts/${{ inputs.name }}/${{ inputs.name }}.zip
