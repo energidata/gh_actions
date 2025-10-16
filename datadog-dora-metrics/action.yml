@@ -1,0 +1,140 @@
+name: 'Datadog DORA Deployments (v2)'
+description: 'Send deployments to Datadog v2 API with DORA fields and enrichments'
+inputs:
+  datadog-api-key:
+    description: 'Datadog API key'
+    required: true
+  datadog-site:
+    description: 'Datadog site (e.g., datadoghq.eu)'
+    required: false
+    default: 'datadoghq.eu'
+  service-name:
+    description: 'Service name for tracking'
+    required: true
+  environment:
+    description: 'Environment name (dev, staging, production, etc.)'
+    required: true
+  deployment-status:
+    description: 'Deployment status (successful, failed, canceled). If not provided, will auto-detect from workflow result.'
+    required: false
+    default: ''
+  started-at:
+    description: 'Deployment start time (ISO8601). If not provided, recorded automatically.'
+    required: false
+  finished-at:
+    description: 'Deployment finish time (ISO8601). If not provided, recorded automatically.'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Record deployment start time
+      id: deploy-start
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.started-at }}" ]; then
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+        else
+          echo "started_at=${{ inputs.started-at }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Record deployment finish time
+      id: deploy-finish
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.finished-at }}" ]; then
+          echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+        else
+          echo "finished_at=${{ inputs.finished-at }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Auto-detect deployment status
+      id: detect-status
+      shell: bash
+      run: |
+        # Auto-detect status if not provided
+        if [ -z "${{ inputs.deployment-status }}" ]; then
+          # Check if this step is running because of a failure
+          if [ "${{ job.status }}" = "failure" ] || [ "${{ job.status }}" = "cancelled" ]; then
+            if [ "${{ job.status }}" = "cancelled" ]; then
+              echo "detected_status=canceled" >> $GITHUB_OUTPUT
+            else
+              echo "detected_status=failed" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "detected_status=successful" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "detected_status=${{ inputs.deployment-status }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Send deployment to Datadog v2
+      shell: bash
+      run: |
+        STATUS="${{ steps.detect-status.outputs.detected_status }}"
+        RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        ACTOR="${{ github.actor }}"
+        EVENT_NAME="${{ github.event_name }}"
+        PR_NUMBER=""
+        PR_URL=""
+        PR_TITLE=""
+        if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
+          if command -v jq >/dev/null 2>&1; then
+            PR_NUMBER=$(jq -r '.number // empty' "$GITHUB_EVENT_PATH")
+            PR_URL=$(jq -r '.pull_request.html_url // empty' "$GITHUB_EVENT_PATH")
+            PR_TITLE=$(jq -r '.pull_request.title // empty' "$GITHUB_EVENT_PATH")
+          fi
+        fi
+
+        # Convert ISO8601 timestamps to Unix timestamps for DORA API
+        STARTED_AT=$(date -d "${{ steps.deploy-start.outputs.started_at }}" +%s 2>/dev/null || date +%s)
+        FINISHED_AT=$(date -d "${{ steps.deploy-finish.outputs.finished_at }}" +%s 2>/dev/null || date +%s)
+
+        cat > body.json <<'JSON'
+        {
+          "data": {
+            "attributes": {
+              "started_at": __STARTED_AT__,
+              "finished_at": __FINISHED_AT__,
+              "git": {
+                "commit_sha": "${{ github.sha }}",
+                "repository_url": "https://github.com/${{ github.repository }}"
+              },
+              "service": "${{ inputs.service-name }}",
+              "version": "${{ github.sha }}"
+            }
+          }
+        }
+        JSON
+        sed -i.bak "s/__STARTED_AT__/${STARTED_AT}/" body.json
+        sed -i.bak "s/__FINISHED_AT__/${FINISHED_AT}/" body.json
+        sed -i.bak "s/__STATUS__/${STATUS}/" body.json
+
+        if command -v jq >/dev/null 2>&1; then
+          # Add link to workflow run
+          jq --arg url "$RUN_URL" '.data.attributes.links = [{"type":"run","url":$url}]' body.json > body.tmp && mv body.tmp body.json
+          # Add deployer identity
+          jq --arg actor "$ACTOR" '.data.attributes.deployer = {"username": $actor}' body.json > body.tmp && mv body.tmp body.json
+          # Add environment
+          jq --arg env "${{ inputs.environment }}" '.data.attributes.env = $env' body.json > body.tmp && mv body.tmp body.json
+          # Add custom tags
+          jq --arg branch "${{ github.ref_name }}" --arg event "${{ github.event_name }}" --arg workflow "${{ github.workflow }}" \
+             '.data.attributes.custom_tags = ["branch:" + $branch, "event:" + $event, "workflow:" + $workflow]' body.json > body.tmp && mv body.tmp body.json
+          # Add PR context when available
+          if [ -n "$PR_NUMBER" ] && [ -n "$PR_URL" ]; then
+            jq --arg num "$PR_NUMBER" --arg url "$PR_URL" --arg title "$PR_TITLE" \
+               '.data.attributes.pr = {"number": ($num|tonumber), "url": $url, "title": $title}' body.json > body.tmp && mv body.tmp body.json
+          fi
+        fi
+
+        # Debug: Show the payload being sent
+        echo "=== DORA Payload ==="
+        cat body.json | jq .
+        echo "==================="
+        
+        curl -sS -X POST "https://api.${{ inputs.datadog-site }}/api/v2/dora/deployment" \
+          -H "Accept: application/json" \
+          -H "Content-Type: application/json" \
+          -H "DD-API-KEY: ${{ inputs.datadog-api-key }}" \
+          -d @body.json -w ' status=%{http_code}\n'
+        rm -f body.json body.json.bak
