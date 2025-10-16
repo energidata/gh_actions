@@ -45,7 +45,13 @@ runs:
         aws-region: ${{ inputs.artifact_aws_region }}
         role-session-name: artifactSession
         role-to-assume: ${{ inputs.artifact_aws_role }} 
-        role-duration-seconds: 1200
+        role-duration-seconds: 3600
+
+    - name: Clear Docker credentials
+      shell: bash
+      run: |
+        rm -f ~/.docker/config.json
+        docker logout ${{ env.REGISTRY }} || true
 
     - name: ECR Login
       id: login-ecr
