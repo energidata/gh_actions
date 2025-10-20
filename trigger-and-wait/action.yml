@@ -1,0 +1,113 @@
+name: 'Trigger and Wait for Workflow'
+description: 'Triggers a workflow and waits for its completion'
+
+inputs:
+  workflow:
+    description: 'The workflow file name to trigger'
+    required: true
+  env:
+    description: 'Environment to deploy to'
+    required: true
+  github-token:
+    description: 'GitHub token with necessary permissions'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check if workflow file exists and trigger workflow
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        workflow_file="${{ inputs.workflow }}"
+        response=$(curl -sS -H "Authorization: token $GITHUB_TOKEN" \
+          "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_file")
+        
+        if [ $? -ne 0 ] || [ "$(echo "$response" | jq -r '.message')" = "Not Found" ]; then
+          echo "::error::Workflow file $workflow_file not found in the repository."
+          exit 1
+        fi
+
+        workflow_id=$(echo "$response" | jq -r '.id')
+        echo "WORKFLOW_ID=$workflow_id" >> $GITHUB_ENV
+        
+        # Construct inputs JSON
+        inputs_json="{\"env\":\"${{ inputs.env }}\"}"
+        
+        # Add orchestrator_run_id if needed
+        if echo "$response" | jq -e '.inputs | has("orchestrator_run_id")' > /dev/null; then
+          inputs_json=$(echo $inputs_json | jq '. + {"orchestrator_run_id":"'"${{ github.run_id }}"'"}')
+        fi
+        
+        # Get current timestamp before triggering
+        timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+        echo "TRIGGER_TIME=$timestamp" >> $GITHUB_ENV
+        
+        echo "Triggering workflow with inputs: $inputs_json"
+        trigger_response=$(curl -sS -X POST -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$workflow_file/dispatches" \
+          -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":$inputs_json}")
+        
+        if [ -n "$trigger_response" ]; then
+          echo "::error::Failed to trigger workflow: $trigger_response"
+          exit 1
+        else
+          echo "Workflow triggered successfully."
+        fi
+
+    - name: Wait for Workflow Completion
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        workflow_file="${{ inputs.workflow }}"
+        max_attempts=60
+        attempt=0
+        expected_env="${{ inputs.env }}"
+        actual_env="${expected_env:-dev}"  # If expected_env is empty, use 'dev' as per workflow defaults
+        
+        while [ $attempt -lt $max_attempts ]; do
+          # Get runs created after our trigger time
+          response=$(curl -sS -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ env.WORKFLOW_ID }}/runs?created=>${{ env.TRIGGER_TIME }}&event=workflow_dispatch&per_page=10")
+          
+          echo "Recent workflow runs for $workflow_file (after ${{ env.TRIGGER_TIME }}):"
+          echo "$response" | jq -r '.workflow_runs[] | "ID: \(.id), Status: \(.status), Conclusion: \(.conclusion), Created: \(.created_at), Updated: \(.updated_at), Branch: \(.head_branch), Environment: \(.environment)"'
+          
+          # Check for matching runs, but only verify branch and timing
+          matched_run=$(echo "$response" | jq -r --arg ref "${{ github.ref }}" --arg time "${{ env.TRIGGER_TIME }}" \
+            '.workflow_runs[] | select(
+              .head_branch == ($ref | split("/")[-1]) and
+              (.created_at > $time)
+            ) | select(.)')
+          
+          if [ -n "$matched_run" ]; then
+            status=$(echo "$matched_run" | jq -r '.status')
+            conclusion=$(echo "$matched_run" | jq -r '.conclusion')
+            run_id=$(echo "$matched_run" | jq -r '.id')
+            
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "Workflow $workflow_file completed successfully. Run #$run_id"
+                exit 0
+              elif [ "$conclusion" = "failure" ]; then
+                echo "::error::Workflow $workflow_file (Run #$run_id) failed"
+                echo "::error::Check logs at: https://github.com/${{ github.repository }}/actions/runs/$run_id"
+                exit 1
+              fi
+            elif [ "$status" = "in_progress" ] || [ "$status" = "queued" ]; then
+              echo "Workflow is $status. Run #$run_id"
+            fi
+          else
+            echo "Waiting for workflow to start... (Attempt $((attempt+1))/$max_attempts)"
+          fi
+          
+          sleep 30
+          attempt=$((attempt+1))
+        done
+        
+        echo "::error::Workflow $workflow_file did not complete within the expected time frame."
+        exit 1
+
