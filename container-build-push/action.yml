@@ -60,7 +60,7 @@ runs:
     - name: ECR Login
       shell: bash
       run: |
-        REGISTRY="${{ inputs.artifact_aws_account_id }}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
+        REGISTRY="767397690392.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
         echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
     
         aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
