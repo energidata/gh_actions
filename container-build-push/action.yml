@@ -53,16 +53,22 @@ runs:
         mkdir -p ${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}
         echo "DOCKER_CONFIG=${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
 
-    - name: ECR Login
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+    # - name: ECR Login
+    #   id: login-ecr
+    #   uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Pull base image
+    - name: ECR Login
       shell: bash
-      env:
-        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
       run: |
-        docker pull ${{ env.REGISTRY }}/ed_services:build-image-7
+        aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
+          docker login --username AWS --password-stdin ${{ inputs.artifact_aws_region }}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com
+
+    # - name: Pull base image
+    #   shell: bash
+    #   env:
+    #     REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+    #   run: |
+    #     docker pull ${{ env.REGISTRY }}/ed_services:build-image-7
 
     - name: Build and push Docker image
       shell: bash
