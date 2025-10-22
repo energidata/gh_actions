@@ -66,12 +66,12 @@ runs:
         aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
         docker login --username AWS --password-stdin "${REGISTRY}"
 
-    # - name: Pull base image
-    #   shell: bash
-    #   env:
-    #     REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-    #   run: |
-    #     docker pull ${{ env.REGISTRY }}/ed_services:build-image-7
+    - name: Pull base image
+      shell: bash
+      env:
+        REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        docker pull ${{ env.REGISTRY }}/ed_services:build-image-7
 
     - name: Build and push Docker image
       shell: bash
