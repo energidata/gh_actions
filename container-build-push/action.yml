@@ -58,13 +58,15 @@ runs:
     #   uses: aws-actions/amazon-ecr-login@v2
 
     - name: ECR Login
+      id: login-ecr
       shell: bash
       run: |
-        REGISTRY="767397690392.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
+        AWS_ACCOUNT_ID=$(echo "${{ inputs.artifact_aws_role }}" | cut -d':' -f5)
+        REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
         echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
     
         aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
-        docker login --username AWS --password-stdin "${REGISTRY}"
+          docker login --username AWS --password-stdin "${REGISTRY}"
 
     - name: Pull base image
       shell: bash
