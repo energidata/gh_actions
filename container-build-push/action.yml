@@ -60,6 +60,8 @@ runs:
     - name: ECR Login
       id: login-ecr
       shell: bash
+      env:
+        DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}  
       run: |
         AWS_ACCOUNT_ID=$(echo "${{ inputs.artifact_aws_role }}" | cut -d':' -f5)
         REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
@@ -81,6 +83,7 @@ runs:
         REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         REPOSITORY: ed_services
         IMAGE_TAG: ${{ steps.image-name.outputs.image-name }} 
+        DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}  
       run: |
         if [ -f ${{ inputs.path}}/Dockerfile ]; then
           DOCKERFILE=${{ inputs.path}}/Dockerfile
