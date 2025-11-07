@@ -65,6 +65,10 @@ runs:
         cd "${BASE_DIR}"
         git remote set-url origin https://x-access-token:${{ inputs.gh_token }}@github.com/${{ github.repository }}
         git fetch origin --prune
+
+        # Ensure we have the specific commit (for PR merges)
+        echo "Fetching commit ${{ github.sha }}"
+        git fetch origin ${{ github.sha }} || git fetch origin ${{ github.ref }}
         
         # Determine working directory based on branch
         if [ "${BRANCH_NAME}" = "main" ] || [ "${BRANCH_NAME}" = "master" ]; then
