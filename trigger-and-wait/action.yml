@@ -77,9 +77,10 @@ runs:
           echo "$response" | jq -r '.workflow_runs[] | "ID: \(.id), Status: \(.status), Conclusion: \(.conclusion), Created: \(.created_at), Updated: \(.updated_at), Branch: \(.head_branch), Environment: \(.environment)"'
           
           # Check for matching runs, but only verify branch and timing
+          # Extract branch name from refs/heads/branch-name format
           matched_run=$(echo "$response" | jq -r --arg ref "${{ github.ref }}" --arg time "${{ env.TRIGGER_TIME }}" \
             '.workflow_runs[] | select(
-              .head_branch == ($ref | split("/")[-1]) and
+              .head_branch == ($ref | sub("^refs/heads/"; "")) and
               (.created_at > $time)
             ) | select(.)')
           
