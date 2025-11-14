@@ -33,10 +33,13 @@ runs:
 
     - name: Configure DEV AWS Credentials
       shell: bash
+      env:
+        AWS_SHARED_CREDENTIALS_FILE: /tmp/aws-creds-${{ github.run_id }}-${{ github.run_attempt }}
+        AWS_CONFIG_FILE: /tmp/aws-config-${{ github.run_id }}-${{ github.run_attempt }}
       run: |
         CREDS=$(aws sts assume-role \
           --role-arn ${{ inputs.artifact_aws_role }} \
-          --role-session-name artifactSession \
+          --role-session-name artifactSession-${{ github.run_id }}-${{ github.run_attempt }} \
           --duration-seconds 1200 \
           --region ${{ inputs.artifact_aws_region }})
 
@@ -86,10 +89,13 @@ runs:
 
     - name: Assume role in deployment account
       shell: bash
+      env:
+        AWS_SHARED_CREDENTIALS_FILE: /tmp/aws-creds-${{ github.run_id }}-${{ github.run_attempt }}
+        AWS_CONFIG_FILE: /tmp/aws-config-${{ github.run_id }}-${{ github.run_attempt }}
       run: |
         CREDS=$(aws sts assume-role \
           --role-arn 'arn:aws:iam::${{ inputs.aws_account_id }}:role/cdk-hnb659fds-cfn-exec-role-${{ inputs.aws_account_id }}-${{ inputs.aws_region }}' \
-          --role-session-name deploySession \
+          --role-session-name deploySession-${{ github.run_id }}-${{ github.run_attempt }} \
           --duration-seconds 1200 \
           --region ${{ inputs.aws_region }})
 
