@@ -38,12 +38,13 @@ runs:
         # with regex remove @ and / from package name
         PACKAGE_NAME_CLEAN=`sed -E 's/@//g; s/\//-/g' <<< "${{ steps.package.outputs.name }}"`
         echo "image-name=${PACKAGE_NAME_CLEAN}-${{ env.GITHUB_REF_SLUG }}-${{ steps.package.outputs.version }}.${{ github.run_number }}.${RANDOM_NUMBER}" >> $GITHUB_OUTPUT
+        echo "random-id=${RANDOM_NUMBER}" >> $GITHUB_OUTPUT
 
     - name: Configure DEV AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-region: ${{ inputs.artifact_aws_region }}
-        role-session-name: artifactSession
+        role-session-name: artifactSession-${{ github.run_id }}-${{ steps.image-name.outputs.random-id }}
         role-to-assume: ${{ inputs.artifact_aws_role }}
         role-duration-seconds: 3600
 
@@ -52,10 +53,6 @@ runs:
       run: |
         mkdir -p ${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}
         echo "DOCKER_CONFIG=${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
-
-    # - name: ECR Login
-    #   id: login-ecr
-    #   uses: aws-actions/amazon-ecr-login@v2
 
     - name: ECR Login
       id: login-ecr
@@ -69,13 +66,6 @@ runs:
     
         aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
           docker login --username AWS --password-stdin "${REGISTRY}"
-
-    # - name: Pull base image
-    #   shell: bash
-    #   env:
-    #     REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-    #   run: |
-    #     docker pull ${{ env.REGISTRY }}/ed_services:build-image-7
 
     - name: Build and push Docker image
       shell: bash
