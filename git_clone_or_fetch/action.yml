@@ -79,7 +79,7 @@ runs:
           echo "Using main repository"
           WORK_DIR="${BASE_DIR}"
           git reset --hard HEAD
-          git clean -fd -e '.docker-config-*'
+          git clean -fd -e '.docker-config-*' -e 'publish'
           git checkout ${{ github.sha }}
         else
           # Feature branch - use worktree
@@ -89,7 +89,7 @@ runs:
             echo "Updating existing worktree at ${WORK_DIR}"
             cd "${WORK_DIR}"
             git reset --hard HEAD
-            git clean -fd -e '.docker-config-*'
+            git clean -fd -e '.docker-config-*' -e 'publish'
             git fetch origin
             git checkout ${{ github.sha }}
           else
