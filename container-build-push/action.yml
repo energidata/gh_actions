@@ -146,9 +146,42 @@ runs:
           --build-arg SERVICE_PATH=${{ inputs.path }} \
           -f "$DOCKERFILE" .
 
-        echo "Build complete, pushing image..."
+        echo "Build complete, checking if config.json still exists..."
+        echo "DEBUG: Checking DOCKER_CONFIG directory after build:"
+        ls -la "${DOCKER_CONFIG}/" || echo "ERROR: DOCKER_CONFIG directory disappeared!"
+
+        if [ ! -f "${DOCKER_CONFIG}/config.json" ]; then
+          echo "ERROR: config.json was DELETED during docker build!"
+          echo "This explains why push fails with 'no basic auth credentials'"
+          echo "Attempting to recreate with explicit docker login..."
+
+          # Use docker login instead of credential helper since that's more reliable
+          aws ecr get-login-password --region ${AWS_REGION} | \
+            docker --config "${DOCKER_CONFIG}" login --username AWS --password-stdin "${REGISTRY}"
+
+          echo "Recreated config.json via docker login:"
+          cat "${DOCKER_CONFIG}/config.json"
+        else
+          echo "DEBUG: config.json still exists after build"
+          cat "${DOCKER_CONFIG}/config.json"
+        fi
+
+        echo "Pushing image..."
         docker --config "${DOCKER_CONFIG}" push ${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
 
         echo "Push complete for job ${{ github.job }}"
       working-directory: ${{ inputs.working_dir }}
-        
+
+    - name: Cleanup isolated Docker config
+      shell: bash
+      if: always()
+      run: |
+        DOCKER_CONFIG_PATH="${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}"
+        if [ -d "${DOCKER_CONFIG_PATH}" ]; then
+          echo "Cleaning up Docker config directory: ${DOCKER_CONFIG_PATH}"
+          rm -rf "${DOCKER_CONFIG_PATH}"
+          echo "Cleanup complete"
+        else
+          echo "Docker config directory already removed: ${DOCKER_CONFIG_PATH}"
+        fi
+
