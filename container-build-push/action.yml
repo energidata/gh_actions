@@ -71,13 +71,11 @@ runs:
 
         # Configure Docker to use ECR credential helper instead of static credentials
         echo "Creating config.json with credential helper configuration..."
-        cat > "${DOCKER_CONFIG_PATH}/config.json" <<'EOF'
-{
-  "credHelpers": {
-    "REGISTRY_PLACEHOLDER": "ecr-login"
-  }
-}
-EOF
+        echo '{' > "${DOCKER_CONFIG_PATH}/config.json"
+        echo '  "credHelpers": {' >> "${DOCKER_CONFIG_PATH}/config.json"
+        echo '    "REGISTRY_PLACEHOLDER": "ecr-login"' >> "${DOCKER_CONFIG_PATH}/config.json"
+        echo '  }' >> "${DOCKER_CONFIG_PATH}/config.json"
+        echo '}' >> "${DOCKER_CONFIG_PATH}/config.json"
 
         if [ ! -f "${DOCKER_CONFIG_PATH}/config.json" ]; then
           echo "ERROR: Failed to create config.json"
