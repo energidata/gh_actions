@@ -51,8 +51,17 @@ runs:
       id: setup-docker
       shell: bash
       run: |
+        set -e
         DOCKER_CONFIG_PATH="${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}"
+
+        echo "Creating Docker config directory: ${DOCKER_CONFIG_PATH}"
         mkdir -p "${DOCKER_CONFIG_PATH}"
+
+        if [ ! -d "${DOCKER_CONFIG_PATH}" ]; then
+          echo "ERROR: Failed to create Docker config directory"
+          exit 1
+        fi
+
         echo "DOCKER_CONFIG=${DOCKER_CONFIG_PATH}" >> $GITHUB_ENV
 
         # Get registry details
@@ -61,16 +70,26 @@ runs:
         echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
 
         # Configure Docker to use ECR credential helper instead of static credentials
-        cat > "${DOCKER_CONFIG_PATH}/config.json" <<EOF
-        {
-          "credHelpers": {
-            "${REGISTRY}": "ecr-login"
-          }
-        }
-        EOF
+        echo "Creating config.json with credential helper configuration..."
+        cat > "${DOCKER_CONFIG_PATH}/config.json" <<'EOF'
+{
+  "credHelpers": {
+    "REGISTRY_PLACEHOLDER": "ecr-login"
+  }
+}
+EOF
 
-        echo "Docker config created with ECR credential helper at: ${DOCKER_CONFIG_PATH}"
-        echo "Registry: ${REGISTRY}"
+        if [ ! -f "${DOCKER_CONFIG_PATH}/config.json" ]; then
+          echo "ERROR: Failed to create config.json"
+          exit 1
+        fi
+
+        # Replace placeholder with actual registry
+        sed -i "s|REGISTRY_PLACEHOLDER|${REGISTRY}|g" "${DOCKER_CONFIG_PATH}/config.json"
+
+        echo "Verifying config.json content:"
+        cat "${DOCKER_CONFIG_PATH}/config.json"
+        echo "Docker config setup complete for job ${{ github.job }}"
 
     - name: Build and push Docker image
       shell: bash
