@@ -89,7 +89,7 @@ runs:
             echo "Updating existing worktree at ${WORK_DIR}"
             cd "${WORK_DIR}"
             git reset --hard HEAD
-            git clean -fd
+            git clean -fd -e '.docker-config-*'
             git fetch origin
             git checkout ${{ github.sha }}
           else
