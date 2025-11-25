@@ -60,11 +60,14 @@ runs:
         DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}
       run: |
         export DOCKER_CONFIG="${DOCKER_CONFIG}"
+        echo "Using Docker config: ${DOCKER_CONFIG}"
         AWS_ACCOUNT_ID=$(echo "${{ inputs.artifact_aws_role }}" | cut -d':' -f5)
         REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
         echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
         aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
-          docker login --username AWS --password-stdin "${REGISTRY}"
+          docker --config "${DOCKER_CONFIG}" login --username AWS --password-stdin "${REGISTRY}"
+        echo "Verifying config.json was created:"
+        ls -la "${DOCKER_CONFIG}/"
 
     - name: Build and push Docker image
       shell: bash
@@ -75,12 +78,14 @@ runs:
         DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}
       run: |
         export DOCKER_CONFIG="${DOCKER_CONFIG}"
+        echo "Using Docker config for build/push: ${DOCKER_CONFIG}"
         if [ -f ${{ inputs.path}}/Dockerfile ]; then
           DOCKERFILE=${{ inputs.path}}/Dockerfile
         else
           DOCKERFILE=./Dockerfile
         fi
-        docker build -t ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }} --build-arg NPM_AUTH_TOKEN=${{ inputs.npm-auth-token }} --build-arg SERVICE_PATH=${{ inputs.path }} -f "$DOCKERFILE" .
-        docker push ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
+        docker --config "${DOCKER_CONFIG}" build -t ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }} --build-arg NPM_AUTH_TOKEN=${{ inputs.npm-auth-token }} --build-arg SERVICE_PATH=${{ inputs.path }} -f "$DOCKERFILE" .
+        echo "Build complete, pushing image..."
+        docker --config "${DOCKER_CONFIG}" push ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
       working-directory: ${{ inputs.working_dir }}
         
