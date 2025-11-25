@@ -43,7 +43,7 @@ runs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-region: ${{ inputs.artifact_aws_region }}
-        role-session-name: artifactSession
+        role-session-name: artifactSession-${{ github.run_id }}-${{ github.run_attempt }}
         role-to-assume: ${{ inputs.artifact_aws_role }}
         role-duration-seconds: 3600
 
@@ -61,12 +61,12 @@ runs:
       id: login-ecr
       shell: bash
       env:
-        DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}  
+        DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}
       run: |
+        export DOCKER_CONFIG="${DOCKER_CONFIG}"
         AWS_ACCOUNT_ID=$(echo "${{ inputs.artifact_aws_role }}" | cut -d':' -f5)
         REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
         echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
-    
         aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
           docker login --username AWS --password-stdin "${REGISTRY}"
 
@@ -82,9 +82,10 @@ runs:
       env:
         REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         REPOSITORY: ed_services
-        IMAGE_TAG: ${{ steps.image-name.outputs.image-name }} 
-        DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}  
+        IMAGE_TAG: ${{ steps.image-name.outputs.image-name }}
+        DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}
       run: |
+        export DOCKER_CONFIG="${DOCKER_CONFIG}"
         if [ -f ${{ inputs.path}}/Dockerfile ]; then
           DOCKERFILE=${{ inputs.path}}/Dockerfile
         else
