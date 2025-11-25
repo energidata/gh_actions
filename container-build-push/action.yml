@@ -43,15 +43,15 @@ runs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-region: ${{ inputs.artifact_aws_region }}
-        role-session-name: artifactSession-${{ github.run_id }}-${{ github.run_attempt }}
+        role-session-name: artifactSession-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
         role-to-assume: ${{ inputs.artifact_aws_role }}
         role-duration-seconds: 3600
 
     - name: Setup isolated Docker config
       shell: bash
       run: |
-        mkdir -p ${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}
-        echo "DOCKER_CONFIG=${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_ENV
+        mkdir -p ${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+        echo "DOCKER_CONFIG=${{ inputs.working_dir }}/.docker-config-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}" >> $GITHUB_ENV
 
     - name: ECR Login
       id: login-ecr
