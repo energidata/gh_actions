@@ -71,19 +71,29 @@ runs:
 
         # Configure Docker to use ECR credential helper instead of static credentials
         echo "Creating config.json with credential helper configuration..."
-        echo '{' > "${DOCKER_CONFIG_PATH}/config.json"
-        echo '  "credHelpers": {' >> "${DOCKER_CONFIG_PATH}/config.json"
-        echo '    "REGISTRY_PLACEHOLDER": "ecr-login"' >> "${DOCKER_CONFIG_PATH}/config.json"
-        echo '  }' >> "${DOCKER_CONFIG_PATH}/config.json"
-        echo '}' >> "${DOCKER_CONFIG_PATH}/config.json"
+        echo "DEBUG: Writing to ${DOCKER_CONFIG_PATH}/config.json"
+        echo "DEBUG: Directory permissions:"
+        ls -la "${DOCKER_CONFIG_PATH}"
+
+        echo '{' > "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to write to config.json (line 1)"; exit 1; }
+        echo '  "credHelpers": {' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 2)"; exit 1; }
+        echo '    "REGISTRY_PLACEHOLDER": "ecr-login"' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 3)"; exit 1; }
+        echo '  }' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 4)"; exit 1; }
+        echo '}' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 5)"; exit 1; }
+
+        echo "DEBUG: File after write:"
+        ls -la "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: config.json does not exist after write!"; exit 1; }
 
         if [ ! -f "${DOCKER_CONFIG_PATH}/config.json" ]; then
           echo "ERROR: Failed to create config.json"
           exit 1
         fi
 
-        # Replace placeholder with actual registry
-        sed -i "s|REGISTRY_PLACEHOLDER|${REGISTRY}|g" "${DOCKER_CONFIG_PATH}/config.json"
+        echo "DEBUG: Running sed to replace placeholder..."
+        sed -i "s|REGISTRY_PLACEHOLDER|${REGISTRY}|g" "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: sed failed"; exit 1; }
+
+        echo "DEBUG: File after sed:"
+        ls -la "${DOCKER_CONFIG_PATH}/config.json"
 
         echo "Verifying config.json content:"
         cat "${DOCKER_CONFIG_PATH}/config.json"
@@ -104,6 +114,25 @@ runs:
       run: |
         export DOCKER_CONFIG="${DOCKER_CONFIG}"
         echo "Using Docker config: ${DOCKER_CONFIG}"
+
+        # Debug: Check if config directory and file exist
+        echo "DEBUG: Checking if config directory exists..."
+        ls -la "${DOCKER_CONFIG}" || echo "ERROR: Directory does not exist!"
+
+        echo "DEBUG: Checking if config.json exists..."
+        if [ -f "${DOCKER_CONFIG}/config.json" ]; then
+          echo "DEBUG: config.json found, contents:"
+          cat "${DOCKER_CONFIG}/config.json"
+        else
+          echo "ERROR: config.json NOT FOUND at ${DOCKER_CONFIG}/config.json"
+          exit 1
+        fi
+
+        echo "DEBUG: Current docker context:"
+        docker context ls
+
+        echo "DEBUG: Docker buildx builder info:"
+        docker buildx ls
 
         if [ -f ${{ inputs.path}}/Dockerfile ]; then
           DOCKERFILE=${{ inputs.path}}/Dockerfile
