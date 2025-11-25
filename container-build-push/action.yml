@@ -47,7 +47,7 @@ runs:
         role-to-assume: ${{ inputs.artifact_aws_role }}
         role-duration-seconds: 3600
 
-    - name: Setup isolated Docker config with ECR credential helper
+    - name: Setup isolated Docker config and login to ECR
       id: setup-docker
       shell: bash
       run: |
@@ -69,35 +69,38 @@ runs:
         REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${{ inputs.artifact_aws_region }}.amazonaws.com"
         echo "registry=${REGISTRY}" >> $GITHUB_OUTPUT
 
-        # Configure Docker to use ECR credential helper instead of static credentials
-        echo "Creating config.json with credential helper configuration..."
-        echo "DEBUG: Writing to ${DOCKER_CONFIG_PATH}/config.json"
-        echo "DEBUG: Directory permissions:"
-        ls -la "${DOCKER_CONFIG_PATH}"
+        # Login to ECR with retry logic (credential helpers are unreliable with buildx)
+        echo "Logging in to ECR: ${REGISTRY}"
+        MAX_RETRIES=3
+        RETRY_COUNT=0
 
-        echo '{' > "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to write to config.json (line 1)"; exit 1; }
-        echo '  "credHelpers": {' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 2)"; exit 1; }
-        echo '    "REGISTRY_PLACEHOLDER": "ecr-login"' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 3)"; exit 1; }
-        echo '  }' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 4)"; exit 1; }
-        echo '}' >> "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: Failed to append to config.json (line 5)"; exit 1; }
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          if aws ecr get-login-password --region ${{ inputs.artifact_aws_region }} | \
+             docker --config "${DOCKER_CONFIG_PATH}" login --username AWS --password-stdin "${REGISTRY}"; then
+            echo "Successfully logged in to ECR"
+            break
+          else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              echo "Login failed, attempt $RETRY_COUNT of $MAX_RETRIES. Retrying in 5 seconds..."
+              sleep 5
+            else
+              echo "ERROR: Failed to login to ECR after $MAX_RETRIES attempts"
+              exit 1
+            fi
+          fi
+        done
 
-        echo "DEBUG: File after write:"
-        ls -la "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: config.json does not exist after write!"; exit 1; }
-
-        if [ ! -f "${DOCKER_CONFIG_PATH}/config.json" ]; then
-          echo "ERROR: Failed to create config.json"
+        echo "Verifying config.json was created:"
+        ls -la "${DOCKER_CONFIG_PATH}/"
+        if [ -f "${DOCKER_CONFIG_PATH}/config.json" ]; then
+          echo "config.json exists"
+        else
+          echo "ERROR: config.json was not created by docker login"
           exit 1
         fi
 
-        echo "DEBUG: Running sed to replace placeholder..."
-        sed -i "s|REGISTRY_PLACEHOLDER|${REGISTRY}|g" "${DOCKER_CONFIG_PATH}/config.json" || { echo "ERROR: sed failed"; exit 1; }
-
-        echo "DEBUG: File after sed:"
-        ls -la "${DOCKER_CONFIG_PATH}/config.json"
-
-        echo "Verifying config.json content:"
-        cat "${DOCKER_CONFIG_PATH}/config.json"
-        echo "Docker config setup complete for job ${{ github.job }}"
+        echo "Docker config setup and ECR login complete for job ${{ github.job }}"
 
     - name: Build and push Docker image
       shell: bash
@@ -112,62 +115,65 @@ runs:
         AWS_REGION: ${{ inputs.artifact_aws_region }}
         AWS_DEFAULT_REGION: ${{ inputs.artifact_aws_region }}
       run: |
+        set -e
         export DOCKER_CONFIG="${DOCKER_CONFIG}"
         echo "Using Docker config: ${DOCKER_CONFIG}"
 
-        # Debug: Check if config directory and file exist
-        echo "DEBUG: Checking if config directory exists..."
-        ls -la "${DOCKER_CONFIG}" || echo "ERROR: Directory does not exist!"
+        # Function to ensure we're logged in
+        ensure_logged_in() {
+          if [ ! -d "${DOCKER_CONFIG}" ]; then
+            echo "WARNING: Docker config directory was deleted, recreating..."
+            mkdir -p "${DOCKER_CONFIG}"
+          fi
 
-        echo "DEBUG: Checking if config.json exists..."
-        if [ -f "${DOCKER_CONFIG}/config.json" ]; then
-          echo "DEBUG: config.json found, contents:"
-          cat "${DOCKER_CONFIG}/config.json"
-        else
-          echo "ERROR: config.json NOT FOUND at ${DOCKER_CONFIG}/config.json"
-          exit 1
-        fi
+          if [ ! -f "${DOCKER_CONFIG}/config.json" ]; then
+            echo "WARNING: config.json missing, logging in to ECR..."
+            aws ecr get-login-password --region ${AWS_REGION} | \
+              docker --config "${DOCKER_CONFIG}" login --username AWS --password-stdin "${REGISTRY}"
+            echo "Re-login complete"
+          fi
+        }
 
-        echo "DEBUG: Current docker context:"
-        docker context ls
-
-        echo "DEBUG: Docker buildx builder info:"
-        docker buildx ls
-
+        # Determine Dockerfile path
         if [ -f ${{ inputs.path}}/Dockerfile ]; then
           DOCKERFILE=${{ inputs.path}}/Dockerfile
         else
           DOCKERFILE=./Dockerfile
         fi
 
+        # Build image
         echo "Building image: ${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}"
         docker --config "${DOCKER_CONFIG}" build -t ${REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
           --build-arg NPM_AUTH_TOKEN=${{ inputs.npm-auth-token }} \
           --build-arg SERVICE_PATH=${{ inputs.path }} \
           -f "$DOCKERFILE" .
+        echo "Build complete"
 
-        echo "Build complete, checking if config.json still exists..."
-        echo "DEBUG: Checking DOCKER_CONFIG directory after build:"
-        ls -la "${DOCKER_CONFIG}/" || echo "ERROR: DOCKER_CONFIG directory disappeared!"
+        # Ensure we're still logged in after build (directory might have been deleted)
+        ensure_logged_in
 
-        if [ ! -f "${DOCKER_CONFIG}/config.json" ]; then
-          echo "ERROR: config.json was DELETED during docker build!"
-          echo "This explains why push fails with 'no basic auth credentials'"
-          echo "Attempting to recreate with explicit docker login..."
+        # Push image with retry logic
+        echo "Pushing image: ${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}"
+        MAX_RETRIES=3
+        RETRY_COUNT=0
 
-          # Use docker login instead of credential helper since that's more reliable
-          aws ecr get-login-password --region ${AWS_REGION} | \
-            docker --config "${DOCKER_CONFIG}" login --username AWS --password-stdin "${REGISTRY}"
-
-          echo "Recreated config.json via docker login:"
-          cat "${DOCKER_CONFIG}/config.json"
-        else
-          echo "DEBUG: config.json still exists after build"
-          cat "${DOCKER_CONFIG}/config.json"
-        fi
-
-        echo "Pushing image..."
-        docker --config "${DOCKER_CONFIG}" push ${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          if docker --config "${DOCKER_CONFIG}" push ${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}; then
+            echo "Push successful"
+            break
+          else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              echo "Push failed, attempt $RETRY_COUNT of $MAX_RETRIES"
+              echo "Re-authenticating and retrying in 5 seconds..."
+              sleep 5
+              ensure_logged_in
+            else
+              echo "ERROR: Failed to push image after $MAX_RETRIES attempts"
+              exit 1
+            fi
+          fi
+        done
 
         echo "Push complete for job ${{ github.job }}"
       working-directory: ${{ inputs.working_dir }}
