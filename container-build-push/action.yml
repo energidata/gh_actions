@@ -96,6 +96,11 @@ runs:
         REPOSITORY: ed_services
         IMAGE_TAG: ${{ steps.image-name.outputs.image-name }}
         DOCKER_CONFIG: ${{ env.DOCKER_CONFIG }}
+        AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+        AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+        AWS_REGION: ${{ inputs.artifact_aws_region }}
+        AWS_DEFAULT_REGION: ${{ inputs.artifact_aws_region }}
       run: |
         export DOCKER_CONFIG="${DOCKER_CONFIG}"
         echo "Using Docker config: ${DOCKER_CONFIG}"
